@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>万有引力 軌道シミュレーター (a, T 可視化)</title>
+  <style>
+    :root{
+      --bg:#0b0f14; --panel:#10161d; --muted:#8aa0b4; --text:#e6eef6; --accent:#35a3ff; --accent2:#59d29a; --warn:#ffde59;
+      --grid:#1c2733; --grid2:#15202b; --trail:#9bd1ff; --orbit:#c5f7d9;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans","Apple Color Emoji","Segoe UI Emoji"}
+    .app{display:grid;grid-template-columns:320px 1fr;grid-template-rows:auto 1fr;gap:0;height:100%}
+    header{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #13202b;background:linear-gradient(180deg,#0e141b,#0b0f14);position:sticky;top:0;z-index:5}
+    header h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.2px}
+    header .actions{display:flex;gap:8px}
+    button{appearance:none;border:1px solid #253445;background:#13202b;color:var(--text);padding:10px 14px;border-radius:12px;font-weight:600;cursor:pointer;touch-action:manipulation}
+    button:hover{border-color:#335171}
+    button.primary{background:linear-gradient(180deg,#1570ef,#175cd3);border-color:#175cd3}
+    button.ghost{background:#0f1520;border-color:#223041}
+    .panel{padding:14px;border-right:1px solid #13202b;overflow:auto;background:var(--panel)}
+    .section{margin-bottom:16px;padding-bottom:12px;border-bottom:1px dashed #1d2a38}
+    .section:last-child{border-bottom:none}
+    .row{display:grid;grid-template-columns:1fr 110px;gap:10px;align-items:center;margin:8px 0}
+    .row label{font-size:12px;color:var(--muted)}
+    .row input[type="range"]{width:100%}
+    .row input[type="number"], .row select{width:100%;background:#0e141b;color:var(--text);border:1px solid #243243;border-radius:10px;padding:10px 10px;font-size:14px}
+    select{appearance:none}
+    .note{font-size:12px;color:var(--muted)}
+    .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .stat{background:#0f1520;border:1px solid #1f2d3d;border-radius:12px;padding:10px}
+    .stat .k{font-size:12px;color:var(--muted)}
+    .stat .v{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;font-weight:700}
+    canvas{display:block;width:100%;height:100%;background:radial-gradient(600px 400px at 20% 20%, #0e1722 0%, #0b0f14 60%, #0b0f14 100%)}
+    .legend{position:absolute;left:8px;bottom:8px;font-size:12px;color:#b3c5d7;background:#0c1219cc;border:1px solid #1b2a3a;border-radius:8px;padding:8px 10px;backdrop-filter:blur(4px)}
+    .legend .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+    .hud{position:absolute;right:10px;top:10px;background:#0c1219cc;border:1px solid #1b2a3a;border-radius:12px;padding:10px;min-width:220px}
+    .hud h3{margin:0 0 6px 0;font-size:13px;color:#b9cfe3;font-weight:600}
+    .hud .line{display:flex;justify-content:space-between;font-family:ui-monospace,monospace;font-size:12px;margin:2px 0}
+    .kbd{font-family:ui-monospace,monospace;background:#0e141b;border:1px solid #223041;border-radius:6px;padding:0 6px}
+    .canvas-wrap{position:relative}
+
+    /* --- Mobile layout --- */
+    @media (max-width: 900px){
+      .app{grid-template-columns:1fr;grid-template-rows:auto 60vh auto}
+      .panel{grid-row:3;grid-column:1;-webkit-overflow-scrolling:touch;border-right:none;border-top:1px solid #13202b}
+      .canvas-wrap{grid-row:2;height:60vh}
+      header h1{font-size:14px}
+      .row{grid-template-columns:1fr 90px}
+      button{padding:12px 14px;border-radius:14px}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>万有引力 軌道シミュレーター — a と T を表示 (leapfrog)</h1>
+      <div class="actions">
+        <button id="playBtn" class="primary">▶ 再生</button>
+        <button id="resetBtn" class="ghost">↻ リセット</button>
+        <button id="fitBtn" class="ghost">⤢ 自動ズーム</button>
+        <button id="togglePanelBtn" class="ghost" aria-expanded="true">☰ パネル</button>
+      </div>
+    </header>
+    <aside class="panel" id="panel">
+      <div class="section">
+        <div class="row"><label>重力パラメータ μ = G·M</label><input id="mu" type="number" step="0.1" value="1" inputmode="decimal"/></div>
+        <div class="row"><label>初期半径 r₀</label><input id="r0" type="number" step="0.1" value="2" inputmode="decimal"/></div>
+        <div class="row"><label>初期角 θ₀ (deg)</label><input id="th0" type="number" step="1" value="20" inputmode="numeric"/></div>
+        <div class="row"><label>初期速さ |v₀|</label><input id="v0" type="number" step="0.01" value="0.45" inputmode="decimal"/></div>
+        <div class="row"><label>速度の向き φᵥ₀ (deg)</label><input id="phi0" type="number" step="1" value="110" inputmode="numeric"/></div>
+        <div class="row"><label>トレイル保持</label>
+          <select id="trailMode">
+            <option value="full" selected>全軌跡</option>
+            <option value="fade">尾が消える</option>
+          </select>
+        </div>
+        <div class="row"><label>時間倍率 (実時間×)</label>
+          <input id="speed" type="range" min="0.2" max="8" step="0.1" value="3" aria-label="時間倍率スライダー">
+          <input id="speedNum" type="number" step="0.1" value="3" inputmode="decimal" aria-label="時間倍率数値入力">
+        </div>
+        <div class="note">Enter で適用。 / <span class="kbd">Space</span> 再生/停止, <span class="kbd">R</span> リセット, <span class="kbd">F</span> 自動ズーム</div>
+      </div>
+      <div class="section">
+        <div class="stats" id="stats">
+          <div class="stat"><div class="k">離心率 e</div><div class="v" id="stat-e">—</div></div>
+          <div class="stat"><div class="k">準位角運動量 h</div><div class="v" id="stat-h">—</div></div>
+          <div class="stat"><div class="k">半長軸 a</div><div class="v" id="stat-a">—</div></div>
+          <div class="stat"><div class="k">周期 T</div><div class="v" id="stat-T">—</div></div>
+        </div>
+        <div class="note" id="boundNote">—</div>
+      </div>
+      <div class="section">
+        <div class="stats">
+          <div class="stat"><div class="k">t (モデル時刻)</div><div class="v" id="stat-time">0.000</div></div>
+          <div class="stat"><div class="k">|r|</div><div class="v" id="stat-r">—</div></div>
+        </div>
+      </div>
+    </aside>
+    <div class="canvas-wrap" id="canvasWrap">
+      <canvas id="cv"></canvas>
+      <div class="legend">
+        <div><span class="dot" style="background:var(--warn)"></span> 中心天体</div>
+        <div><span class="dot" style="background:#fff"></span> 粒子</div>
+        <div><span class="dot" style="background:var(--trail)"></span> 軌跡</div>
+        <div><span class="dot" style="background:var(--orbit)"></span> 概形/長軸</div>
+      </div>
+      <div class="hud" id="hud">
+        <h3>軌道要約</h3>
+        <div class="line"><span>エネルギー E</span><span id="hud-E">—</span></div>
+        <div class="line"><span>分類</span><span id="hud-type">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ---------- Math helpers ----------
+  const TAU = Math.PI * 2;
+  const vec = {
+    add: (a,b)=>[a[0]+b[0], a[1]+b[1]],
+    sub: (a,b)=>[a[0]-b[0], a[1]-b[1]],
+    mul: (a,s)=>[a[0]*s, a[1]*s],
+    dot: (a,b)=>a[0]*b[0]+a[1]*b[1],
+    norm:(a)=>Math.hypot(a[0],a[1]),
+  };
+  const cross2 = (a,b)=> a[0]*b[1]-a[1]*b[0]; // z-component
+
+  // ---------- DOM refs ----------
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const wrap = document.getElementById('canvasWrap');
+  const panelEl = document.getElementById('panel');
+  const togglePanelBtn = document.getElementById('togglePanelBtn');
+  const inputs = {
+    mu: document.getElementById('mu'), r0: document.getElementById('r0'), th0: document.getElementById('th0'),
+    v0: document.getElementById('v0'), phi0: document.getElementById('phi0'), trailMode: document.getElementById('trailMode'),
+    speed: document.getElementById('speed'), speedNum: document.getElementById('speedNum')
+  };
+  const stat = {
+    e: document.getElementById('stat-e'), h: document.getElementById('stat-h'), a: document.getElementById('stat-a'), T: document.getElementById('stat-T'),
+    r: document.getElementById('stat-r'), t: document.getElementById('stat-time'), note: document.getElementById('boundNote'),
+    E: document.getElementById('hud-E'), type: document.getElementById('hud-type')
+  };
+  const playBtn = document.getElementById('playBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const fitBtn = document.getElementById('fitBtn');
+
+  // keep slider/number in sync
+  inputs.speed.addEventListener('input',()=> inputs.speedNum.value = inputs.speed.value);
+  inputs.speedNum.addEventListener('input',()=> inputs.speed.value = inputs.speedNum.value);
+
+  // ---------- World <-> Screen transform ----------
+  let world = { cx:0, cy:0, scale: 70 }; // pixels per world unit
+  function fitToTrail() {
+    if (trail.length < 4) return;
+    let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
+    for (let i=0;i<trail.length;i++){
+      const p=trail[i]; minx=Math.min(minx,p[0]);miny=Math.min(miny,p[1]);maxx=Math.max(maxx,p[0]);maxy=Math.max(maxy,p[1]);
+    }
+    const pad = 0.3*Math.max(maxx-minx,maxy-miny)+0.5;
+    const W = (maxx-minx)+pad*2; const H=(maxy-miny)+pad*2;
+    const sc = Math.min(cv.width/W, cv.height/H);
+    world.scale = sc;
+    world.cx = (minx+maxx)/2; world.cy=(miny+maxy)/2;
+  }
+  function W2S([x,y]){return [(x-world.cx)*world.scale + cv.width/2, cv.height/2 - (y-world.cy)*world.scale];}
+  function S2W([X,Y]){return [ (X-cv.width/2)/world.scale + world.cx, -(Y-cv.height/2)/world.scale + world.cy];}
+
+  // ---------- Simulation state ----------
+  let params, pos, vel, t=0, dt=0.005, running=false, bound=false, a=Infinity, T=Infinity, e=NaN, h=0, E=0, evec=[0,0];
+  let trail = []; const MAX_TRAIL = 8000; let fadeTrail = false; // fade by thinning
+
+  function accel(r){
+    const rnorm = Math.max(1e-12, vec.norm(r));
+    const k = -params.mu/(rnorm*rnorm*rnorm);
+    return [k*r[0], k*r[1]];
+  }
+
+  function computeOrbitElements(r,v){
+    const rn = vec.norm(r); const vn = vec.norm(v);
+    const h_ = cross2(r,v); // specific angular momentum (z)
+    const E_ = 0.5*vn*vn - params.mu/rn; // specific energy
+    // e_vec = (v × h)/mu - r/|r|
+    // in 2D: v×h = h * ( -v_y, v_x )
+    const vxh = [-v[1]*h_, v[0]*h_];
+    const evec_ = vec.sub( vec.mul(vxh, 1/params.mu), vec.mul(r, 1/Math.max(1e-12,rn)) );
+    const e_ = vec.norm(evec_);
+    let a_ = Infinity, T_ = Infinity, bound_ = E_ < 0;
+    if (bound_){ a_ = -params.mu/(2*E_); T_ = TAU*Math.sqrt(a_*a_*a_/params.mu); }
+    return {e:e_, evec:evec_, a:a_, T:T_, bound:bound_, h:h_, E:E_};
+  }
+
+  function pickDt(){
+    if (bound && isFinite(T)) return T/3000; // ~3000 steps per period
+    // else scale by initial angular rate
+    const rn = vec.norm(pos), omega0 = Math.abs(h)/(rn*rn + 1e-12);
+    return 1/Math.max(500*omega0, 1e-3);
+  }
+
+  function initFromInputs(){
+    params = {
+      mu: parseFloat(inputs.mu.value),
+      r0: parseFloat(inputs.r0.value),
+      th0: toRad(parseFloat(inputs.th0.value)),
+      v0: parseFloat(inputs.v0.value),
+      phi0: toRad(parseFloat(inputs.phi0.value)),
+    };
+    const r0v = [ params.r0*Math.cos(params.th0), params.r0*Math.sin(params.th0) ];
+    const v0v = [ params.v0*Math.cos(params.phi0), params.v0*Math.sin(params.phi0) ];
+
+    ({e, evec, a, T, bound, h, E} = computeOrbitElements(r0v, v0v));
+
+    pos = r0v.slice();
+    vel = v0v.slice();
+    t = 0; trail = [pos.slice()];
+    fadeTrail = (inputs.trailMode.value === 'fade');
+    dt = pickDt();
+
+    world.scale = Math.min(cv.width, cv.height) / ( (params.r0*2.8) + 1e-6 );
+    world.cx = 0; world.cy = 0;
+
+    updateStats();
+    draw(true);
+  }
+
+  function toRad(deg){return deg*Math.PI/180}
+
+  // ---------- Integration step ----------
+  let vhalf = [0,0];
+  function startIntegrator(){
+    const a0 = accel(pos);
+    vhalf = vec.add(vel, vec.mul(a0, 0.5*dt));
+  }
+  function stepOne(){
+    pos = vec.add(pos, vec.mul(vhalf, dt));
+    const a1 = accel(pos);
+    vhalf = vec.add(vhalf, vec.mul(a1, dt));
+    vel = vec.sub(vhalf, vec.mul(a1, 0.5*dt));
+    t += dt;
+
+    if (fadeTrail){ if (trail.length>MAX_TRAIL) trail.splice(0, Math.floor(MAX_TRAIL*0.2)); }
+    else { if (trail.length>MAX_TRAIL) trail.shift(); }
+    trail.push(pos.slice());
+  }
+
+  // ---------- Drawing ----------
+  function draw(drawOrbitOnly=false){
+    resizeCanvas();
+    ctx.clearRect(0,0,cv.width,cv.height);
+    drawGrid();
+
+    const s = W2S([0,0]);
+    ctx.beginPath(); ctx.arc(s[0],s[1],6,0,TAU); ctx.fillStyle = 'rgba(255,210,60,0.95)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(s[0],s[1],10,0,TAU); ctx.fillStyle = 'rgba(255,210,60,0.25)'; ctx.fill();
+
+    if (bound && isFinite(a) && e<1.5){ drawEllipseFromElements(a, e, evec); }
+
+    ctx.lineWidth = 1.8; ctx.strokeStyle = getCss('--trail');
+    ctx.beginPath();
+    for (let i=0;i<trail.length;i++){
+      const p= W2S(trail[i]);
+      if (i===0) ctx.moveTo(p[0],p[1]); else ctx.lineTo(p[0],p[1]);
+    }
+    ctx.stroke();
+
+    const p = W2S(pos);
+    ctx.beginPath(); ctx.arc(p[0],p[1],3.2,0,TAU); ctx.fillStyle='#fff'; ctx.fill();
+
+    if (!drawOrbitOnly){ updateHud(); }
+  }
+
+  function drawGrid(){
+    const step = niceStep( (cv.width/world.scale)/12 );
+    const leftTop = S2W([0,0]);
+    const rightBottom = S2W([cv.width, cv.height]);
+    const xMin = Math.floor(Math.min(leftTop[0], rightBottom[0])/step)*step;
+    const xMax = Math.ceil(Math.max(leftTop[0], rightBottom[0])/step)*step;
+    const yMin = Math.floor(Math.min(leftTop[1], rightBottom[1])/step)*step;
+    const yMax = Math.ceil(Math.max(leftTop[1], rightBottom[1])/step)*step;
+
+    ctx.lineWidth=1;
+    ctx.strokeStyle = getCss('--grid2');
+    for(let x=xMin;x<=xMax;x+=step){
+      const s1=W2S([x,yMin]), s2=W2S([x,yMax]);
+      ctx.beginPath(); ctx.moveTo(s1[0],s1[1]); ctx.lineTo(s2[0],s2[1]); ctx.stroke();
+    }
+    for(let y=yMin;y<=yMax;y+=step){
+      const s1=W2S([xMin,y]), s2=W2S([xMax,y]);
+      ctx.beginPath(); ctx.moveTo(s1[0],s1[1]); ctx.lineTo(s2[0],s2[1]); ctx.stroke();
+    }
+
+    ctx.strokeStyle = getCss('--grid'); ctx.lineWidth=1.5;
+    let s1=W2S([xMin,0]), s2=W2S([xMax,0]); ctx.beginPath(); ctx.moveTo(s1[0],s1[1]); ctx.lineTo(s2[0],s2[1]); ctx.stroke();
+    s1=W2S([0,yMin]); s2=W2S([0,yMax]); ctx.beginPath(); ctx.moveTo(s1[0],s1[1]); ctx.lineTo(s2[0],s2[1]); ctx.stroke();
+  }
+
+  function niceStep(target){
+    const pow = Math.pow(10, Math.floor(Math.log10(target)));
+    const frac = target/pow;
+    if (frac<1.5) return 1*pow; if (frac<3.5) return 2*pow; if (frac<7.5) return 5*pow; return 10*pow;
+  }
+
+  function drawEllipseFromElements(a, e, evec){
+    const evn = vec.norm(evec); if (evn<1e-9) return;
+    const u = [evec[0]/evn, evec[1]/evn];
+    const v = [-u[1], u[0]];
+    const b = a*Math.sqrt(1-e*e);
+    const peri = vec.mul(u, a*(1-e));
+    const apo  = vec.mul(u, -a*(1+e));
+    ctx.strokeStyle = getCss('--orbit'); ctx.lineWidth=2;
+    ctx.beginPath(); let P=W2S(peri); ctx.moveTo(P[0],P[1]); P=W2S(apo); ctx.lineTo(P[0],P[1]); ctx.stroke();
+    ctx.beginPath();
+    const N=400; for(let i=0;i<=N;i++){
+      const th = TAU*i/N;
+      const ex = a*Math.cos(th); const ey = b*Math.sin(th);
+      const fx = ex - a*e; const fy = ey;
+      const wx = u[0]*fx + v[0]*fy; const wy = u[1]*fx + v[1]*fy;
+      const S=W2S([wx,wy]); if(i===0) ctx.moveTo(S[0],S[1]); else ctx.lineTo(S[0],S[1]);
+    }
+    ctx.stroke();
+  }
+
+  function getCss(varName){return getComputedStyle(document.documentElement).getPropertyValue(varName).trim()}
+
+  function updateStats(){
+    stat.e.textContent = fmt(e);
+    stat.h.textContent = fmt(h);
+    stat.E.textContent = fmt(E);
+    if (bound){
+      stat.a.textContent = fmt(a);
+      stat.T.textContent = fmt(T);
+      stat.note.textContent = 'Bound (楕円軌道)';
+      stat.type.textContent = '楕円 (e < 1)';
+    } else {
+      stat.a.textContent = '∞';
+      stat.T.textContent = '∞';
+      const typ = (Math.abs(e-1) < 1e-3) ? '放物線 (e ≈ 1)' : (e>1 ? '双曲線 (e > 1)' : '未分類');
+      stat.note.textContent = typ;
+      stat.type.textContent = typ;
+    }
+  }
+
+  function updateHud(){
+    stat.t.textContent = fmt(t);
+    stat.r.textContent = fmt(vec.norm(pos));
+  }
+
+  function fmt(x){
+    if (!isFinite(x)) return '∞';
+    const ax = Math.abs(x);
+    if (ax>=1e4 || (ax>0 && ax<1e-3)) return x.toExponential(3);
+    return x.toFixed(3);
+  }
+
+  // ---------- Animation loop ----------
+  let rafId=null, lastFrame=0;
+  function loop(ts){
+    rafId = requestAnimationFrame(loop);
+    if (!running){ lastFrame = ts; return; }
+    const speed = parseFloat(inputs.speed.value);
+    const dtReal = Math.min(0.05, (ts - lastFrame)/1000 || 0.016);
+    lastFrame = ts;
+    const substeps = Math.max(1, Math.min(40, Math.floor(speed*8)));
+    const localDt = dt*speed/substeps;
+    for (let i=0;i<substeps;i++) stepOneWithDt(localDt);
+    draw();
+  }
+
+  function stepOneWithDt(local){ const dtSaved = dt; dt = local; stepOne(); dt = dtSaved; }
+
+  function resizeCanvas(){
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio||1));
+    const rect = cv.getBoundingClientRect();
+    const w = Math.floor(rect.width*dpr), h = Math.floor(rect.height*dpr);
+    if (cv.width !== w || cv.height !== h){ cv.width = w; cv.height = h; ctx.setTransform(dpr,0,0,dpr,0,0); }
+  }
+  window.addEventListener('resize', ()=> draw(true));
+
+  // ---------- Controls ----------
+  playBtn.addEventListener('click', ()=>{ running=!running; playBtn.textContent = running? '⏸ 一時停止' : '▶ 再生'; if (running) { lastFrame=performance.now(); requestAnimationFrame(loop);} });
+  resetBtn.addEventListener('click', ()=>{ running=false; playBtn.textContent='▶ 再生'; initFromInputs(); startIntegrator(); draw(); });
+  fitBtn.addEventListener('click', ()=>{ fitToTrail(); draw(true); });
+
+  togglePanelBtn.addEventListener('click',()=>{
+    const hidden = panelEl.style.display === 'none';
+    panelEl.style.display = hidden ? 'block' : 'none';
+    togglePanelBtn.setAttribute('aria-expanded', hidden ? 'true' : 'false');
+    draw(true);
+  });
+
+  document.addEventListener('keydown', (e)=>{
+    if (e.key==='Enter'){ initFromInputs(); startIntegrator(); draw(); }
+    if (e.key===' '){ e.preventDefault(); playBtn.click(); }
+    if (e.key==='r' || e.key==='R'){ resetBtn.click(); }
+    if (e.key==='f' || e.key==='F'){ fitBtn.click(); }
+  });
+
+  // ---------- Pointer pan & pinch zoom (mobile-friendly) ----------
+  let isPanning=false, lastPt=null, pinchDist=null, startScale=1, startCx=0, startCy=0;
+  cv.addEventListener('pointerdown', (e)=>{
+    cv.setPointerCapture(e.pointerId); isPanning=true; lastPt=[e.clientX,e.clientY];
+  });
+  cv.addEventListener('pointermove', (e)=>{
+    if (!isPanning || !lastPt) return;
+    const dx = e.clientX - lastPt[0];
+    const dy = e.clientY - lastPt[1];
+    world.cx -= dx / world.scale; // invert screen -> world
+    world.cy += dy / world.scale;
+    lastPt=[e.clientX,e.clientY];
+    draw(true);
+  });
+  cv.addEventListener('pointerup', ()=>{ isPanning=false; lastPt=null; });
+  cv.addEventListener('pointercancel', ()=>{ isPanning=false; lastPt=null; });
+
+  // Wheel zoom (desktop)
+  cv.addEventListener('wheel', (e)=>{
+    e.preventDefault();
+    const scaleFactor = Math.exp(-e.deltaY*0.001);
+    const mouse = S2W([e.clientX, e.clientY]);
+    zoomAt(mouse, scaleFactor);
+  }, {passive:false});
+
+  // Touch pinch (2-finger via Touch Events)
+  wrap.addEventListener('touchstart', (e)=>{
+    if (e.touches.length===2){
+      pinchDist = dist2(e.touches[0], e.touches[1]);
+      startScale = world.scale; startCx = world.cx; startCy = world.cy;
+    }
+  }, {passive:true});
+  wrap.addEventListener('touchmove', (e)=>{
+    if (e.touches.length===2 && pinchDist){
+      e.preventDefault();
+      const nd = dist2(e.touches[0], e.touches[1]);
+      const f = nd/pinchDist;
+      const midX=(e.touches[0].clientX+e.touches[1].clientX)/2;
+      const midY=(e.touches[0].clientY+e.touches[1].clientY)/2;
+      const mid = S2W([midX, midY]);
+      world.scale = startScale * f;
+      world.cx = mid[0] - ( (midX - cv.width/2)/world.scale );
+      world.cy = mid[1] + ( (midY - cv.height/2)/world.scale );
+      draw(true);
+    }
+  }, {passive:false});
+  wrap.addEventListener('touchend', ()=>{ pinchDist=null; }, {passive:true});
+
+  function dist2(t1,t2){
+    const dx=t1.clientX-t2.clientX, dy=t1.clientY-t2.clientY; return Math.hypot(dx,dy);
+  }
+  function zoomAt(worldPoint, factor){
+    const before = W2S(worldPoint);
+    world.scale *= factor;
+    const after = W2S(worldPoint);
+    // keep worldPoint under cursor by adjusting center
+    world.cx += (before[0]-after[0])/world.scale;
+    world.cy -= (before[1]-after[1])/world.scale;
+  }
+
+  // ---------- Boot ----------
+  initFromInputs();
+  startIntegrator();
+  draw();
+  setTimeout(()=>{ playBtn.click(); }, 300);
+
+  // iOS address-bar resize fix
+  window.addEventListener('orientationchange', ()=> setTimeout(()=> draw(true), 300));
+
+  </script>
+</body>
+</html>
