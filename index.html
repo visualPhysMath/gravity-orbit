@@ -40,8 +40,6 @@
     .hud .line{display:flex;justify-content:space-between;font-family:ui-monospace,monospace;font-size:12px;margin:2px 0}
     .kbd{font-family:ui-monospace,monospace;background:#0e141b;border:1px solid #223041;border-radius:6px;padding:0 6px}
     .canvas-wrap{position:relative}
-
-    /* --- Mobile layout --- */
     @media (max-width: 900px){
       .app{grid-template-columns:1fr;grid-template-rows:auto 60vh auto}
       .panel{grid-row:3;grid-column:1;-webkit-overflow-scrolling:touch;border-right:none;border-top:1px solid #13202b}
@@ -88,6 +86,8 @@
           <div class="stat"><div class="k">準位角運動量 h</div><div class="v" id="stat-h">—</div></div>
           <div class="stat"><div class="k">半長軸 a</div><div class="v" id="stat-a">—</div></div>
           <div class="stat"><div class="k">周期 T</div><div class="v" id="stat-T">—</div></div>
+          <!-- 追加: Kepler 定数 K = T^2 / a^3 -->
+          <div class="stat"><div class="k">K = T²/a³</div><div class="v" id="stat-K">—</div></div>
         </div>
         <div class="note" id="boundNote">—</div>
       </div>
@@ -104,7 +104,7 @@
         <div><span class="dot" style="background:var(--warn)"></span> 中心天体</div>
         <div><span class="dot" style="background:#fff"></span> 粒子</div>
         <div><span class="dot" style="background:var(--trail)"></span> 軌跡</div>
-        <div><span class="dot" style="background:var(--orbit)"></span> 概形/長軸</div>
+        <div><span class="dot" style="background:var(--orbit)"></span> 概形</div>
       </div>
       <div class="hud" id="hud">
         <h3>軌道要約</h3>
@@ -139,6 +139,7 @@
   };
   const stat = {
     e: document.getElementById('stat-e'), h: document.getElementById('stat-h'), a: document.getElementById('stat-a'), T: document.getElementById('stat-T'),
+    K: document.getElementById('stat-K'),
     r: document.getElementById('stat-r'), t: document.getElementById('stat-time'), note: document.getElementById('boundNote'),
     E: document.getElementById('hud-E'), type: document.getElementById('hud-type')
   };
@@ -193,7 +194,6 @@
 
   function pickDt(){
     if (bound && isFinite(T)) return T/3000; // ~3000 steps per period
-    // else scale by initial angular rate
     const rn = vec.norm(pos), omega0 = Math.abs(h)/(rn*rn + 1e-12);
     return 1/Math.max(500*omega0, 1e-3);
   }
@@ -301,21 +301,20 @@
     if (frac<1.5) return 1*pow; if (frac<3.5) return 2*pow; if (frac<7.5) return 5*pow; return 10*pow;
   }
 
+  // ★ 長軸（近点-遠点の線）は描かない版
   function drawEllipseFromElements(a, e, evec){
     const evn = vec.norm(evec); if (evn<1e-9) return;
     const u = [evec[0]/evn, evec[1]/evn];
     const v = [-u[1], u[0]];
     const b = a*Math.sqrt(1-e*e);
-    const peri = vec.mul(u, a*(1-e));
-    const apo  = vec.mul(u, -a*(1+e));
+
     ctx.strokeStyle = getCss('--orbit'); ctx.lineWidth=2;
-    ctx.beginPath(); let P=W2S(peri); ctx.moveTo(P[0],P[1]); P=W2S(apo); ctx.lineTo(P[0],P[1]); ctx.stroke();
     ctx.beginPath();
     const N=400; for(let i=0;i<=N;i++){
       const th = TAU*i/N;
       const ex = a*Math.cos(th); const ey = b*Math.sin(th);
-      const fx = ex - a*e; const fy = ey;
-      const wx = u[0]*fx + v[0]*fy; const wy = u[1]*fx + v[1]*fy;
+      const fx = ex - a*e; const fy = ey;          // 焦点を原点に合わせる平行移動
+      const wx = u[0]*fx + v[0]*fy; const wy = u[1]*fx + v[1]*fy; // 向き合わせ
       const S=W2S([wx,wy]); if(i===0) ctx.moveTo(S[0],S[1]); else ctx.lineTo(S[0],S[1]);
     }
     ctx.stroke();
@@ -330,11 +329,14 @@
     if (bound){
       stat.a.textContent = fmt(a);
       stat.T.textContent = fmt(T);
+      const K = (T*T)/(a*a*a);      // Kepler の K
+      stat.K.textContent = fmt(K);  // 表示
       stat.note.textContent = 'Bound (楕円軌道)';
       stat.type.textContent = '楕円 (e < 1)';
     } else {
       stat.a.textContent = '∞';
       stat.T.textContent = '∞';
+      stat.K.textContent = '—';     // 非束縛では未定義
       const typ = (Math.abs(e-1) < 1e-3) ? '放物線 (e ≈ 1)' : (e>1 ? '双曲線 (e > 1)' : '未分類');
       stat.note.textContent = typ;
       stat.type.textContent = typ;
@@ -396,7 +398,7 @@
     if (e.key==='f' || e.key==='F'){ fitBtn.click(); }
   });
 
-  // ---------- Pointer pan & pinch zoom (mobile-friendly) ----------
+  // ---------- Pointer pan & pinch zoom ----------
   let isPanning=false, lastPt=null, pinchDist=null, startScale=1, startCx=0, startCy=0;
   cv.addEventListener('pointerdown', (e)=>{
     cv.setPointerCapture(e.pointerId); isPanning=true; lastPt=[e.clientX,e.clientY];
@@ -405,7 +407,7 @@
     if (!isPanning || !lastPt) return;
     const dx = e.clientX - lastPt[0];
     const dy = e.clientY - lastPt[1];
-    world.cx -= dx / world.scale; // invert screen -> world
+    world.cx -= dx / world.scale;
     world.cy += dy / world.scale;
     lastPt=[e.clientX,e.clientY];
     draw(true);
@@ -421,7 +423,7 @@
     zoomAt(mouse, scaleFactor);
   }, {passive:false});
 
-  // Touch pinch (2-finger via Touch Events)
+  // Touch pinch (2-finger)
   wrap.addEventListener('touchstart', (e)=>{
     if (e.touches.length===2){
       pinchDist = dist2(e.touches[0], e.touches[1]);
@@ -451,7 +453,6 @@
     const before = W2S(worldPoint);
     world.scale *= factor;
     const after = W2S(worldPoint);
-    // keep worldPoint under cursor by adjusting center
     world.cx += (before[0]-after[0])/world.scale;
     world.cy -= (before[1]-after[1])/world.scale;
   }
@@ -462,9 +463,7 @@
   draw();
   setTimeout(()=>{ playBtn.click(); }, 300);
 
-  // iOS address-bar resize fix
   window.addEventListener('orientationchange', ()=> setTimeout(()=> draw(true), 300));
-
   </script>
 </body>
 </html>
