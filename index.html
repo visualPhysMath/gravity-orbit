@@ -82,8 +82,7 @@
       </div>
       <div class="section">
         <div class="stats" id="stats">
-          <div class="stat"><div class="k">離心率 e</div><div class="v" id="stat-e">—</div></div>
-          <div class="stat"><div class="k">準位角運動量 h</div><div class="v" id="stat-h">—</div></div>
+          <!-- e, h を削除して a, T, K のみ表示 -->
           <div class="stat"><div class="k">半長軸 a</div><div class="v" id="stat-a">—</div></div>
           <div class="stat"><div class="k">周期 T</div><div class="v" id="stat-T">—</div></div>
           <div class="stat"><div class="k">K = T²/a³</div><div class="v" id="stat-K">—</div></div>
@@ -114,6 +113,7 @@
   </div>
 
   <script>
+  // ---------- Math helpers ----------
   const TAU = Math.PI * 2;
   const vec = {
     add: (a,b)=>[a[0]+b[0], a[1]+b[1]],
@@ -124,6 +124,7 @@
   };
   const cross2 = (a,b)=> a[0]*b[1]-a[1]*b[0]; // z-component
 
+  // ---------- DOM refs ----------
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d');
   const wrap = document.getElementById('canvasWrap');
@@ -135,8 +136,7 @@
     speed: document.getElementById('speed'), speedNum: document.getElementById('speedNum')
   };
   const stat = {
-    e: document.getElementById('stat-e'), h: document.getElementById('stat-h'), a: document.getElementById('stat-a'), T: document.getElementById('stat-T'),
-    K: document.getElementById('stat-K'),
+    a: document.getElementById('stat-a'), T: document.getElementById('stat-T'), K: document.getElementById('stat-K'),
     r: document.getElementById('stat-r'), t: document.getElementById('stat-time'), note: document.getElementById('boundNote'),
     E: document.getElementById('hud-E'), type: document.getElementById('hud-type')
   };
@@ -147,6 +147,7 @@
   inputs.speed.addEventListener('input',()=> inputs.speedNum.value = inputs.speed.value);
   inputs.speedNum.addEventListener('input',()=> inputs.speed.value = inputs.speedNum.value);
 
+  // ---------- World <-> Screen transform ----------
   let world = { cx:0, cy:0, scale: 70 };
   function fitToTrail() {
     if (trail.length < 4) return;
@@ -163,6 +164,7 @@
   function W2S([x,y]){return [(x-world.cx)*world.scale + cv.width/2, cv.height/2 - (y-world.cy)*world.scale];}
   function S2W([X,Y]){return [ (X-cv.width/2)/world.scale + world.cx, -(Y-cv.height/2)/world.scale + world.cy];}
 
+  // ---------- Simulation state ----------
   let params, pos, vel, t=0, dt=0.005, running=false, bound=false, a=Infinity, T=Infinity, e=NaN, h=0, E=0, evec=[0,0];
   let trail = []; const MAX_TRAIL = 8000; let fadeTrail = false;
 
@@ -174,22 +176,15 @@
 
   function computeOrbitElements(r,v){
     const rn = vec.norm(r); const vn = vec.norm(v);
-    const h_ = cross2(r,v);                 // specific angular momentum (z)
-    const E_ = 0.5*vn*vn - params.mu/rn;    // specific energy
-
-    // ✅ 2D での v × h = (v_y h, -v_x h)（h は z 成分）
+    const h_ = cross2(r,v);
+    const E_ = 0.5*vn*vn - params.mu/rn;
+    // v × h (2D; h is z scalar)
     const vxh = [ v[1]*h_, -v[0]*h_ ];
-
-    // e_vec = (v×h)/mu - r/|r|
     const evec_ = vec.sub( vec.mul(vxh, 1/params.mu), vec.mul(r, 1/Math.max(1e-12,rn)) );
-    const e_vec_norm = vec.norm(evec_);
-
-    // 検算: e^2 = 1 + 2 E h^2 / mu^2
-    const e_from_Eh = Math.sqrt(Math.max(0, 1 + 2*E_*h_*h_/(params.mu*params.mu)));
-
+    const e_ = vec.norm(evec_);
     let a_ = Infinity, T_ = Infinity, bound_ = E_ < 0;
     if (bound_){ a_ = -params.mu/(2*E_); T_ = TAU*Math.sqrt(a_*a_*a_/params.mu); }
-    return {e:e_vec_norm, e_check:e_from_Eh, evec:evec_, a:a_, T:T_, bound:bound_, h:h_, E:E_};
+    return {e:e_, evec:evec_, a:a_, T:T_, bound:bound_, h:h_, E:E_};
   }
 
   function pickDt(){
@@ -209,8 +204,7 @@
     const r0v = [ params.r0*Math.cos(params.th0), params.r0*Math.sin(params.th0) ];
     const v0v = [ params.v0*Math.cos(params.phi0), params.v0*Math.sin(params.phi0) ];
 
-    const elems = computeOrbitElements(r0v, v0v);
-    e = elems.e; evec = elems.evec; a = elems.a; T = elems.T; bound = elems.bound; h = elems.h; E = elems.E; e_check = elems.e_check;
+    ({e, evec, a, T, bound, h, E} = computeOrbitElements(r0v, v0v));
 
     pos = r0v.slice();
     vel = v0v.slice();
@@ -227,6 +221,7 @@
 
   function toRad(deg){return deg*Math.PI/180}
 
+  // ---------- Integration step ----------
   let vhalf = [0,0];
   function startIntegrator(){
     const a0 = accel(pos);
@@ -244,6 +239,7 @@
     trail.push(pos.slice());
   }
 
+  // ---------- Drawing ----------
   function draw(drawOrbitOnly=false){
     resizeCanvas();
     ctx.clearRect(0,0,cv.width,cv.height);
@@ -276,7 +272,7 @@
     const xMin = Math.floor(Math.min(leftTop[0], rightBottom[0])/step)*step;
     const xMax = Math.ceil(Math.max(leftTop[0], rightBottom[0])/step)*step;
     const yMin = Math.floor(Math.min(leftTop[1], rightBottom[1])/step)*step;
-    const yMax = Math.ceil(Math.max(leftTop[1], rightBottom[1])/step)*step;
+    const yMax = Math.ceil(Math.max(Math.min(leftTop[1], rightBottom[1]), yMin)/step)*step;
 
     ctx.lineWidth=1;
     ctx.strokeStyle = getCss('--grid2');
@@ -321,13 +317,6 @@
   function getCss(varName){return getComputedStyle(document.documentElement).getPropertyValue(varName).trim()}
 
   function updateStats(){
-    // e の検算（初期 r,v から再計算）
-    const elemsNow = computeOrbitElements(pos, vel);
-    const e_now = elemsNow.e;             // 現在位置でのオスキュレーティング e（数値誤差の影響を受ける）
-    const e_diff = Math.abs(e_now - e);   // 初期の理論値との差
-
-    stat.e.textContent = fmt(e) + (e_diff > 1e-3 ? "  ⚠︎chk" : "");
-    stat.h.textContent = fmt(h);
     stat.E.textContent = fmt(E);
     if (bound){
       stat.a.textContent = fmt(a);
@@ -335,12 +324,12 @@
       const K = (T*T)/(a*a*a);
       stat.K.textContent = fmt(K);
       stat.note.textContent = 'Bound (楕円軌道)';
-      stat.type.textContent = '楕円 (e < 1)';
+      stat.type.textContent = '楕円 (e < 1)'; // 表示だけ。e 値は出さない
     } else {
       stat.a.textContent = '∞';
       stat.T.textContent = '∞';
       stat.K.textContent = '—';
-      const typ = (Math.abs(e-1) < 1e-3) ? '放物線 (e ≈ 1)' : (e>1 ? '双曲線 (e > 1)' : '未分類');
+      const typ = (E===0) ? '放物線 (E = 0)' : (E>0 ? '双曲線 (E > 0)' : '未分類');
       stat.note.textContent = typ;
       stat.type.textContent = typ;
     }
@@ -358,6 +347,7 @@
     return x.toFixed(3);
   }
 
+  // ---------- Animation loop ----------
   let rafId=null, lastFrame=0;
   function loop(ts){
     rafId = requestAnimationFrame(loop);
@@ -381,6 +371,7 @@
   }
   window.addEventListener('resize', ()=> draw(true));
 
+  // ---------- Controls ----------
   playBtn.addEventListener('click', ()=>{ running=!running; playBtn.textContent = running? '⏸ 一時停止' : '▶ 再生'; if (running) { lastFrame=performance.now(); requestAnimationFrame(loop);} });
   resetBtn.addEventListener('click', ()=>{ running=false; playBtn.textContent='▶ 再生'; initFromInputs(); startIntegrator(); draw(); });
   fitBtn.addEventListener('click', ()=>{ fitToTrail(); draw(true); });
@@ -399,6 +390,7 @@
     if (e.key==='f' || e.key==='F'){ fitBtn.click(); }
   });
 
+  // ---------- Pointer pan & pinch zoom ----------
   let isPanning=false, lastPt=null, pinchDist=null, startScale=1, startCx=0, startCy=0;
   cv.addEventListener('pointerdown', (e)=>{
     cv.setPointerCapture(e.pointerId); isPanning=true; lastPt=[e.clientX,e.clientY];
@@ -415,6 +407,7 @@
   cv.addEventListener('pointerup', ()=>{ isPanning=false; lastPt=null; });
   cv.addEventListener('pointercancel', ()=>{ isPanning=false; lastPt=null; });
 
+  // Wheel zoom (desktop)
   cv.addEventListener('wheel', (e)=>{
     e.preventDefault();
     const scaleFactor = Math.exp(-e.deltaY*0.001);
@@ -422,6 +415,7 @@
     zoomAt(mouse, scaleFactor);
   }, {passive:false});
 
+  // Touch pinch (2-finger)
   wrap.addEventListener('touchstart', (e)=>{
     if (e.touches.length===2){
       pinchDist = dist2(e.touches[0], e.touches[1]);
@@ -455,10 +449,12 @@
     world.cy -= (before[1]-after[1])/world.scale;
   }
 
+  // ---------- Boot ----------
   initFromInputs();
   startIntegrator();
   draw();
   setTimeout(()=>{ playBtn.click(); }, 300);
+
   window.addEventListener('orientationchange', ()=> setTimeout(()=> draw(true), 300));
   </script>
 </body>
